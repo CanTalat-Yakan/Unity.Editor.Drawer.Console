@@ -1,0 +1,17 @@
+{
+    "name": "UnityEssentials.Editor.Drawer.Console.Editor",
+    "rootNamespace": "UnityEssentials",
+    "references": [
+        "GUID:7b89e0d5296362099b4739b0c021c9d4",
+        "GUID:83127e648f2d4e000b7fab40f8b689c6"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
