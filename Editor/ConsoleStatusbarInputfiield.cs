@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -9,10 +10,21 @@ namespace UnityEssentials
     internal static class ConsoleStatusbarInputfiield
     {
         private const string InputTextId = "##console_statusbar_input";
+        private const int MaxHistoryEntries = 50;
 
         private static string _input = string.Empty;
         private static string _currentSuggestion = string.Empty;
+        private static readonly List<string> _suggestions = new(16);
+        private static int _suggestionIndex = -1;
+        private static readonly List<string> _history = new(32);
+        private static int _historyIndex = -1;
         private static GUIStyle _ghostSuffixStyle;
+
+        private enum NavigationMode
+        {
+            Suggestions,
+            History
+        }
 
         static ConsoleStatusbarInputfiield() =>
             StatusbarHook.RightStatusbarGUI.Add(OnStatusbarGUI);
@@ -24,12 +36,18 @@ namespace UnityEssentials
             GUI.contentColor = proSkin ? new Color(0.9f, 0.9f, 0.9f, 1f) : new Color(0.15f, 0.15f, 0.15f, 1f);
 
             GUI.SetNextControlName(InputTextId);
-            _input = GUILayout.TextField(_input ?? string.Empty,
+            var previousInput = _input ?? string.Empty;
+            _input = GUILayout.TextField(previousInput,
                 EditorStyles.toolbarTextField, GUILayout.Width(320f));
+
+            // Any direct user edit exits history browsing mode.
+            if (!string.Equals(previousInput, _input, StringComparison.Ordinal) && _historyIndex >= 0)
+                _historyIndex = -1;
+
+            UpdateSuggestions(_input);
 
             var inputRect = GUILayoutUtility.GetLastRect();
 
-            _currentSuggestion = FindBestSuggestion(_input);
             DrawGhostSuggestion(inputRect);
             HandleInputKeys(Event.current);
 
@@ -45,6 +63,14 @@ namespace UnityEssentials
             if (evt.keyCode == KeyCode.Tab)
                 if (TryAcceptCurrentSuggestion())
                     evt.Use();
+
+            if (evt.keyCode == KeyCode.UpArrow || evt.keyCode == KeyCode.DownArrow)
+            {
+                if(evt.type == EventType.KeyUp)
+                    if (TryNavigateWithArrows(evt.keyCode))
+                        evt.Use();
+                SetCaretToInputEnd();
+            }
 
             if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter)
             {
@@ -65,6 +91,11 @@ namespace UnityEssentials
             if (!Application.isPlaying && !CanExecuteInEditMode(line))
                 return;
 
+            PushHistory(line);
+            _historyIndex = -1;
+            _suggestions.Clear();
+            _suggestionIndex = -1;
+            _currentSuggestion = string.Empty;
             ConsoleHost.TryExecuteLine(line);
         }
 
@@ -93,50 +124,205 @@ namespace UnityEssentials
             return space < 0 ? trimmed : trimmed.Substring(0, space);
         }
 
-        private static string FindBestSuggestion(string input)
+        private static NavigationMode ResolveNavigationMode(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return NavigationMode.History;
+
+            if (_suggestions.Count > 0 && _suggestionIndex >= 0)
+                return NavigationMode.Suggestions;
+
+            return NavigationMode.History;
+        }
+
+        private static void UpdateSuggestions(string input)
         {
             var query = ConsoleUtilities.GetCommandQuery(input);
-            if (string.IsNullOrWhiteSpace(query))
-                return string.Empty;
+            if (string.IsNullOrWhiteSpace(query) || _historyIndex >= 0)
+            {
+                _suggestions.Clear();
+                _suggestionIndex = -1;
+                _currentSuggestion = string.Empty;
+                return;
+            }
 
+            var previouslySelected = (_suggestionIndex >= 0 && _suggestionIndex < _suggestions.Count)
+                ? _suggestions[_suggestionIndex]
+                : string.Empty;
+
+            _suggestions.Clear();
             var commands = ConsoleHost.Commands.SortedCommands;
+            var showAllSuggestions = ShouldShowAllSuggestions(query);
 
-            for (var i = 0; i < commands.Count; i++)
+            if (showAllSuggestions)
             {
-                var name = commands[i].Name;
-                if (string.Equals(name, query, StringComparison.OrdinalIgnoreCase))
-                    continue;
+                for (var i = 0; i < commands.Count; i++)
+                    _suggestions.Add(commands[i].Name);
+            }
+            else
+            {
+                for (var i = 0; i < commands.Count; i++)
+                {
+                    var name = commands[i].Name;
+                    if (string.Equals(name, query, StringComparison.OrdinalIgnoreCase))
+                        continue;
 
-                var match = ConsoleUtilities.MatchCommandQuery(name, query);
-                if (match.IsPrefixMatch)
-                    return name;
+                    var match = ConsoleUtilities.MatchCommandQuery(name, query);
+                    if (match.IsPrefixMatch)
+                        _suggestions.Add(name);
+                }
+
+                for (var i = 0; i < commands.Count; i++)
+                {
+                    var name = commands[i].Name;
+                    if (string.Equals(name, query, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var match = ConsoleUtilities.MatchCommandQuery(name, query);
+                    if (match.IsTokenMatch && !match.IsPrefixMatch)
+                        _suggestions.Add(name);
+                }
             }
 
-            for (var i = 0; i < commands.Count; i++)
+            if (_suggestions.Count == 0)
             {
-                var name = commands[i].Name;
-                if (string.Equals(name, query, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var match = ConsoleUtilities.MatchCommandQuery(name, query);
-                if (match.IsTokenMatch)
-                    return name;
+                _suggestionIndex = -1;
+                _currentSuggestion = string.Empty;
+                return;
             }
 
-            return string.Empty;
+            _suggestionIndex = 0;
+            if (!string.IsNullOrWhiteSpace(previouslySelected))
+            {
+                for (var i = 0; i < _suggestions.Count; i++)
+                {
+                    if (!string.Equals(_suggestions[i], previouslySelected, StringComparison.Ordinal))
+                        continue;
+
+                    _suggestionIndex = i;
+                    break;
+                }
+            }
+
+            SyncCurrentSuggestionFromSelection();
+        }
+
+        private static bool ShouldShowAllSuggestions(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return false;
+
+            var first = query[0];
+            var last = query[query.Length - 1];
+            return ConsoleUtilities.IsCommandTokenSeparator(first)
+                   || ConsoleUtilities.IsCommandTokenSeparator(last);
+        }
+
+        private static void SyncCurrentSuggestionFromSelection()
+        {
+            if (_historyIndex >= 0 || _suggestionIndex < 0 || _suggestionIndex >= _suggestions.Count)
+            {
+                _currentSuggestion = string.Empty;
+                return;
+            }
+
+            _currentSuggestion = _suggestions[_suggestionIndex];
         }
 
         private static bool TryAcceptCurrentSuggestion()
         {
+            UpdateSuggestions(_input);
+
             var suggestion = _currentSuggestion;
             if (string.IsNullOrWhiteSpace(suggestion))
                 return false;
 
             _input = ConsoleUtilities.ReplaceCommandToken(_input, suggestion);
+            _historyIndex = -1;
             EditorGUI.FocusTextInControl(InputTextId);
             SetCaretToInputEnd();
-            _currentSuggestion = FindBestSuggestion(_input);
+            UpdateSuggestions(_input);
             return true;
+        }
+
+        private static bool TryNavigateWithArrows(KeyCode keyCode)
+        {
+            var query = ConsoleUtilities.GetCommandQuery(_input);
+            UpdateSuggestions(_input);
+
+            var mode = ResolveNavigationMode(query);
+            if (mode == NavigationMode.Suggestions)
+            {
+                if (_suggestions.Count == 0)
+                    return false;
+
+                if (_suggestionIndex < 0 || _suggestionIndex >= _suggestions.Count)
+                    _suggestionIndex = 0;
+
+                if (keyCode == KeyCode.UpArrow)
+                    _suggestionIndex = (_suggestionIndex - 1 + _suggestions.Count) % _suggestions.Count;
+                else if (keyCode == KeyCode.DownArrow)
+                    _suggestionIndex = (_suggestionIndex + 1) % _suggestions.Count;
+                else
+                    return false;
+
+                SyncCurrentSuggestionFromSelection();
+                _historyIndex = -1;
+                EditorGUI.FocusTextInControl(InputTextId);
+                return true;
+            }
+
+            _suggestionIndex = -1;
+            _currentSuggestion = string.Empty;
+
+            if (_history.Count == 0)
+                return false;
+
+            if (keyCode == KeyCode.UpArrow)
+            {
+                if (_historyIndex < 0)
+                    _historyIndex = _history.Count - 1;
+                else
+                    _historyIndex = Mathf.Max(0, _historyIndex - 1);
+
+                if (_historyIndex >= 0 && _historyIndex < _history.Count)
+                    _input = _history[_historyIndex];
+            }
+            else if (keyCode == KeyCode.DownArrow)
+            {
+                if (_historyIndex < 0)
+                    return false;
+
+                _historyIndex++;
+                if (_historyIndex >= _history.Count)
+                {
+                    _historyIndex = -1;
+                    _input = string.Empty;
+                }
+                else
+                {
+                    _input = _history[_historyIndex];
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            _suggestions.Clear();
+            _suggestionIndex = -1;
+            _currentSuggestion = string.Empty;
+            EditorGUI.FocusTextInControl(InputTextId);
+            return true;
+        }
+
+        private static void PushHistory(string line)
+        {
+            if (_history.Count == 0 || !string.Equals(_history[^1], line, StringComparison.Ordinal))
+                _history.Add(line);
+
+            if (_history.Count > MaxHistoryEntries)
+                _history.RemoveAt(0);
         }
 
         private static void SetCaretToInputEnd()
@@ -145,7 +331,12 @@ namespace UnityEssentials
             if (textEditor == null)
                 return;
 
-            var caretIndex = (_input ?? string.Empty).Length;
+            var text = _input ?? string.Empty;
+
+            textEditor.text = text;
+            textEditor.scrollOffset = Vector2.zero;
+
+            var caretIndex = text.Length;
             textEditor.cursorIndex = caretIndex;
             textEditor.selectIndex = caretIndex;
         }
