@@ -117,7 +117,7 @@ namespace UnityEssentials
             s_state.Suggestions.Clear();
             s_state.SuggestionIndex = -1;
             s_state.CurrentSuggestion = string.Empty;
-            ConsoleHost.TryExecuteLine(line);
+            ConsoleHost.TryExecuteLine(line, logToDebug: true);
         }
 
         private static bool CanExecuteInEditMode(string line)
