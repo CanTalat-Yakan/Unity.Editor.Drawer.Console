@@ -22,6 +22,7 @@ namespace UnityEssentials
 
             GUI.SetNextControlName(InputTextId);
             var previousInput = s_state.Input ?? string.Empty;
+            EnsureValidSelectionState(previousInput);
             s_state.Input = GUILayout.TextField(previousInput,
                 EditorStyles.toolbarTextField, GUILayout.Width(320f));
 
@@ -249,18 +250,45 @@ namespace UnityEssentials
 
         private static void SetCaretToInputEnd()
         {
-            var textEditor = GUIUtility.GetStateObject(typeof(TextEditor), GUIUtility.keyboardControl) as TextEditor;
-            if (textEditor == null)
+            if (!TryGetFocusedInputTextEditor(out var textEditor))
                 return;
 
             var text = s_state.Input ?? string.Empty;
-
-            textEditor.text = text;
             textEditor.scrollOffset = Vector2.zero;
 
             var caretIndex = text.Length;
             textEditor.cursorIndex = caretIndex;
             textEditor.selectIndex = caretIndex;
+        }
+
+        private static void EnsureValidSelectionState(string text)
+        {
+            if (!TryGetFocusedInputTextEditor(out var textEditor))
+                return;
+
+            var safeText = text ?? string.Empty;
+            var maxIndex = safeText.Length;
+
+            if (textEditor.cursorIndex < 0 || textEditor.cursorIndex > maxIndex)
+                textEditor.cursorIndex = Mathf.Clamp(textEditor.cursorIndex, 0, maxIndex);
+
+            if (textEditor.selectIndex < 0 || textEditor.selectIndex > maxIndex)
+                textEditor.selectIndex = Mathf.Clamp(textEditor.selectIndex, 0, maxIndex);
+        }
+
+        private static bool TryGetFocusedInputTextEditor(out TextEditor textEditor)
+        {
+            textEditor = null;
+
+            if (!string.Equals(GUI.GetNameOfFocusedControl(), InputTextId, StringComparison.Ordinal))
+                return false;
+
+            var keyboardControl = GUIUtility.keyboardControl;
+            if (keyboardControl <= 0)
+                return false;
+
+            textEditor = GUIUtility.GetStateObject(typeof(TextEditor), keyboardControl) as TextEditor;
+            return textEditor != null;
         }
 
         private static GUIStyle _ghostSuffixStyle;
