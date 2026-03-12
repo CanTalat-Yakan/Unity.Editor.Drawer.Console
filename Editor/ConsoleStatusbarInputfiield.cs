@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using UnityEditor;
+using UnityEditor.ShortcutManagement;
 using UnityEngine;
 
 namespace UnityEssentials
@@ -10,6 +11,11 @@ namespace UnityEssentials
     {
         private const string InputTextId = "##console_statusbar_input";
         private static readonly ConsoleInputState s_state = new();
+        private static bool s_focusRequested;
+
+        [Shortcut("Unity Essentials/Console/Focus Statusbar Input", KeyCode.Space, ShortcutModifiers.Alt)]
+        private static void FocusConsoleInputShortcut() =>
+            RequestFocusFromShortcut();
 
         static ConsoleStatusbarInputfiield() =>
             StatusbarHook.RightStatusbarGUI.Add(OnStatusbarGUI);
@@ -35,6 +41,13 @@ namespace UnityEssentials
             var inputRect = GUILayoutUtility.GetLastRect();
 
             DrawGhostSuggestion(inputRect);
+
+            if (s_focusRequested)
+            {
+                s_focusRequested = false;
+                FocusInputField();
+            }
+
             HandleInputKeys(Event.current);
 
             GUI.contentColor = previousContentColor;
@@ -44,6 +57,9 @@ namespace UnityEssentials
         private static void HandleInputKeys(Event evt)
         {
             if(evt.keyCode == KeyCode.None || evt.type == EventType.Layout)
+                return;
+
+            if (!string.Equals(GUI.GetNameOfFocusedControl(), InputTextId, StringComparison.Ordinal))
                 return;
             
             if (evt.keyCode == KeyCode.Tab)
@@ -63,6 +79,25 @@ namespace UnityEssentials
                 SubmitInput();
                 evt.Use();
             }
+        }
+
+        private static void FocusInputField()
+        {
+            FocusInputTextControl();
+            SetCaretToInputEnd();
+        }
+
+        private static void FocusInputTextControl()
+        {
+            StatusbarFocusController.FocusRightDockContainer();
+            GUI.FocusControl(InputTextId);
+            EditorGUI.FocusTextInControl(InputTextId);
+        }
+
+        public static void RequestFocusFromShortcut()
+        {
+            s_focusRequested = true;
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
         }
 
         private static void SubmitInput()
@@ -171,7 +206,7 @@ namespace UnityEssentials
 
             s_state.Input = ConsoleUtilities.ReplaceCommandToken(s_state.Input, suggestion);
             s_state.HistoryIndex = -1;
-            EditorGUI.FocusTextInControl(InputTextId);
+            FocusInputTextControl();
             SetCaretToInputEnd();
             UpdateSuggestions(s_state.Input);
             return true;
@@ -200,7 +235,7 @@ namespace UnityEssentials
 
                 SyncCurrentSuggestionFromSelection();
                 s_state.HistoryIndex = -1;
-                EditorGUI.FocusTextInControl(InputTextId);
+                FocusInputTextControl();
                 return true;
             }
 
@@ -244,7 +279,7 @@ namespace UnityEssentials
             s_state.Suggestions.Clear();
             s_state.SuggestionIndex = -1;
             s_state.CurrentSuggestion = string.Empty;
-            EditorGUI.FocusTextInControl(InputTextId);
+            FocusInputTextControl();
             return true;
         }
 
