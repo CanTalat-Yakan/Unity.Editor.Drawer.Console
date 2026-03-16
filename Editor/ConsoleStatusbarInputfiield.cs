@@ -13,7 +13,7 @@ namespace UnityEssentials
         private static readonly ConsoleInputState s_state = new();
         private static bool s_focusRequested;
 
-        [Shortcut("Unity Essentials/Console/Focus Statusbar Input", KeyCode.Space, ShortcutModifiers.Alt)]
+        [Shortcut("Unity Essentials/Console/Focus Statusbar Input", KeyCode.Space, ShortcutModifiers.Control)]
         private static void FocusConsoleInputShortcut() =>
             RequestFocusFromShortcut();
 
