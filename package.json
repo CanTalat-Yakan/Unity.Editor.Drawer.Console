@@ -1,6 +1,6 @@
 {
   "name": "com.unityessentials.editor.drawer.console",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "displayName": "Editor Drawer Console",
   "description": "This is a part of the UnityEssentials Ecosystem",
   "unity": "6000.0",
@@ -8,7 +8,8 @@
   "resolutionStrategy": "highestPatch",
   "dependencies": {
     "com.unityessentials.diagnostics.console": "2.0.0",
-    "com.unityessentials.editor.hooks.statusbar": "1.0.0"
+    "com.unityessentials.editor.hooks.statusbar": "1.0.0",
+    "com.unityessentials.systems.singleton": "2.0.0"
   },
   "keywords": [],
   "author": {
